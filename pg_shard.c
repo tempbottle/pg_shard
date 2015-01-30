@@ -38,6 +38,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
+#include "catalog/objectaccess.h"
 #include "commands/extension.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
@@ -135,6 +136,8 @@ static void PgShardExecutorEnd(QueryDesc *queryDesc);
 static void PgShardProcessUtility(Node *parsetree, const char *queryString,
 								  ProcessUtilityContext context, ParamListInfo params,
 								  DestReceiver *dest, char *completionTag);
+static void PgShardAccessHook(ObjectAccessType access, Oid classId, Oid objectId,
+		 	 	 	 	 	   int subId, void *arg);
 
 
 /* declarations for dynamic loading */
@@ -148,6 +151,7 @@ static ExecutorRun_hook_type PreviousExecutorRunHook = NULL;
 static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
+static object_access_hook_type PreviousAccessHook = NULL;
 
 
 /*
@@ -175,6 +179,10 @@ _PG_init(void)
 
 	PreviousProcessUtilityHook = ProcessUtility_hook;
 	ProcessUtility_hook = PgShardProcessUtility;
+
+	PreviousAccessHook = object_access_hook;
+	object_access_hook = PgShardAccessHook;
+
 
 	DefineCustomBoolVariable("pg_shard.all_modifications_commutative",
 							 "Bypasses commutativity checks when enabled", NULL,
@@ -208,6 +216,7 @@ _PG_fini(void)
 	ExecutorFinish_hook = PreviousExecutorFinishHook;
 	ExecutorEnd_hook = PreviousExecutorEndHook;
 	planner_hook = PreviousPlannerHook;
+	object_access_hook = PreviousAccessHook;
 }
 
 
@@ -2013,3 +2022,61 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 								params, dest, completionTag);
 	}
 }
+
+
+static void
+PgShardAccessHook(ObjectAccessType access,
+		 Oid classId,
+		 Oid objectId,
+		 int subId,
+		 void *arg)
+{
+	/* if an object is created */
+	if (access == OAT_POST_CREATE)
+	{
+
+		RangeVar *shardRelationRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+													   SHARD_TABLE_NAME, -1);
+		Oid heapRangeOid = RangeVarGetRelid(shardRelationRangeVar, AccessShareLock,
+											true);
+		/* debug purposes */
+		ereport(INFO, (errmsg("PgShardAccessHook, objectId:%d classId:%d, shard table"
+							  " oid: %d \n", objectId, classId, heapRangeOid)));
+
+
+		/* if the object is a table */
+		if (classId == RelationRelationId)
+		{
+
+			/* check for shard table and add a dependency by getting  */
+			if (objectId == heapRangeOid)
+			{
+				/*
+				 * Appereanty we never get here. What I observed is
+				 * we can only get non-invalid value of heapRangeOid after
+				 * the call when objectId parameter equals the non-invalid
+				 * value of heapRangeOid.
+				 *
+				 * I know this is a long comment, but, compiling the code
+				 * and executing CREATE EXTENSION pg_shard; can reveal what
+				 * I try to tell in a better way.
+				 */
+
+				char *newlyCreatedRelationName = get_rel_name(objectId);
+				ereport(INFO, (errmsg("Expected relation name:%s,  Actual relation name%s\n",
+									  SHARD_TABLE_NAME, newlyCreatedRelationName)));
+
+				/*
+				 * 1) Find oid of pg_shard extension.
+				 * 2) Find objectAddresses of pg_shard and SHARD_TABLE_NAME relation
+				 * 3) call recordDependencyOn with DEPENDENCY_EXTENSION as DependencyType
+				 */
+			}
+
+			/* do the same thing for SHARD_PLACEMENT_TABLE_NAME and PARTITION_TABLE_NAME */
+
+
+		}
+	}
+}
+
