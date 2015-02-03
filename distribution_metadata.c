@@ -50,6 +50,27 @@
 #include "utils/tqual.h"
 
 
+#include "catalog/dependency.h"
+#include "access/genam.h"
+#include "access/heapam.h"
+#include "access/htup.h"
+#include "access/htup_details.h"
+#include "catalog/dependency.h"
+#include "catalog/indexing.h"
+#include "catalog/pg_opclass.h"
+#include "catalog/objectaddress.h"
+#include "commands/defrem.h"
+#include "nodes/nodeFuncs.h"
+#include "parser/parse_expr.h"
+#include "parser/parse_node.h"
+#include "parser/parse_relation.h"
+#include "utils/builtins.h"
+#include "utils/fmgroids.h"
+#include "utils/rel.h"
+#include "utils/syscache.h"
+#include "utils/tqual.h"
+
+
 /*
  * ShardIntervalListCache is used for caching shard interval lists. It begins
  * initialized to empty list as there are no items in the cache.
@@ -609,6 +630,22 @@ InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKe
 
 	/* close relation */
 	relation_close(partitionRelation, RowExclusiveLock);
+
+	ObjectAddress myself = { 0, 0, 0 };
+	Oid metadataSchemaOid = get_namespace_oid(METADATA_SCHEMA_NAME, false);
+	Oid partitionTableOid = get_relname_relid(PARTITION_TABLE_NAME, metadataSchemaOid);
+
+	myself.classId = partitionTableOid;
+	myself.objectId = distributedTableId;
+	myself.objectSubId = 0;
+
+	ObjectAddress pgClassObject = { 0, 0, 0 };
+	/* make sure the table can only be dropped with cascade */
+	pgClassObject.classId = RelationRelationId;
+	pgClassObject.objectId = distributedTableId;
+	pgClassObject.objectSubId = 0;
+
+	recordDependencyOn(&myself, &pgClassObject, DEPENDENCY_EXTENSION);
 }
 
 
