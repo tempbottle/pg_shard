@@ -1,3 +1,7 @@
+### pg_shard v1.0.2 (January 6, 2015) ###
+
+* Adds META.json file for PGXN
+
 ### pg_shard v1.0.1 (December 4, 2014) ###
 
 * Minor documentation fixes
